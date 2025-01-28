@@ -106,7 +106,12 @@
 
                 const commits = await githubResponse.json();
                 const commitMessages = commits.map(commit => commit.commit.message).join("\n");
+                var today = new Date();
+                var dd = String(today.getDate()).padStart(2, '0');
+                var mm = String(today.getMonth() + 1).padStart(2, '0'); //January is 0!
+                var yyyy = today.getFullYear();
 
+                today = mm + '/' + dd + '/' + yyyy;
                 // Generate update message using OpenAI API
                 const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
                     method: "POST",
@@ -123,7 +128,7 @@
                             },
                             {
                                 role: "user",
-                                content: `Template:\n\n${updateTemplate}\n\nCustom Prompt:\n\n${customPrompt}\n\nHere are the commit messages:\n\n${commitMessages}\n\nPlease generate a concise update message.`
+                                content: `Template:\n\n${updateTemplate}\n\nCustom Prompt:\n\n${customPrompt}\n\nHere are the commit messages:\n\n${commitMessages}\n\nPlease generate a concise update message. today is ${today}`
                             }
                         ]
                     })
