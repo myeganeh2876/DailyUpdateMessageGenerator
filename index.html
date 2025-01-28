@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generate Update Message</title>
+    <script>
+        // Function to set default date values
+        function setDefaultDateTime() {
+            const now = new Date();
+
+            // Get the start of the current day (00:00:00)
+            const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+            const startOfDayISO = startOfDay.toLocaleString('sv-SE', { timeZoneName: 'short' }).replace(' ', 'T').slice(0, 16); // Format: YYYY-MM-DDTHH:MM
+
+            // Get the end of the current day (23:59:59)
+            const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+            const endOfDayISO = endOfDay.toLocaleString('sv-SE', { timeZoneName: 'short' }).replace(' ', 'T').slice(0, 16); // Format: YYYY-MM-DDTHH:MM
+
+            // Set the values in the input fields
+            document.getElementById("start-date").value = startOfDayISO;
+            document.getElementById("end-date").value = endOfDayISO;
+        }
+
+        // Function to store form values in localStorage
+        function storeFormValues() {
+            localStorage.setItem('repo-url', document.getElementById('repo-url').value);
+            localStorage.setItem('github-token', document.getElementById('github-token').value);
+            localStorage.setItem('openai-token', document.getElementById('openai-token').value);
+            localStorage.setItem('openai-model', document.getElementById('openai-model').value);
+            localStorage.setItem('update-template', document.getElementById('update-template').value);
+            localStorage.setItem('custom-prompt', document.getElementById('custom-prompt').value);
+            localStorage.setItem('start-date', document.getElementById('start-date').value);
+            localStorage.setItem('end-date', document.getElementById('end-date').value);
+        }
+
+        // Function to load form values from localStorage
+        function loadFormValues() {
+            const repoUrl = localStorage.getItem('repo-url');
+            const githubToken = localStorage.getItem('github-token');
+            const openAiToken = localStorage.getItem('openai-token');
+            const openAiModel = localStorage.getItem('openai-model');
+            const updateTemplate = localStorage.getItem('update-template');
+            const customPrompt = localStorage.getItem('custom-prompt');
+            const startDate = localStorage.getItem('start-date');
+            const endDate = localStorage.getItem('end-date');
+
+            if (repoUrl) document.getElementById('repo-url').value = repoUrl;
+            if (githubToken) document.getElementById('github-token').value = githubToken;
+            if (openAiToken) document.getElementById('openai-token').value = openAiToken;
+            if (openAiModel) document.getElementById('openai-model').value = openAiModel;
+            if (updateTemplate) document.getElementById('update-template').value = updateTemplate;
+            if (customPrompt) document.getElementById('custom-prompt').value = customPrompt;
+            if (startDate) document.getElementById('start-date').value = startDate;
+            if (endDate) document.getElementById('end-date').value = endDate;
+        }
+
+        // Call the function on page load
+        window.onload = function() {
+            setDefaultDateTime(); // Set the default date and time values
+            loadFormValues(); // Load saved values from localStorage
+        };
+
+        async function fetchCommits() {
+            const githubToken = document.getElementById("github-token").value.trim();
+            const repoUrl = document.getElementById("repo-url").value.trim();
+            const openAiToken = document.getElementById("openai-token").value.trim();
+            const openAiModel = document.getElementById("openai-model").value.trim();
+            const updateTemplate = document.getElementById("update-template").value.trim();
+            const customPrompt = document.getElementById("custom-prompt").value.trim();
+            const startDate = document.getElementById("start-date").value.trim();
+            const endDate = document.getElementById("end-date").value.trim();
+
+            if (!githubToken || !repoUrl || !openAiToken || !openAiModel || !updateTemplate || !customPrompt) {
+                alert("Please fill in all required fields.");
+                return;
+            }
+
+            try {
+                // Extract owner and repo name from URL
+                const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git|$)/);
+                if (!match) {
+                    throw new Error("Invalid GitHub repository URL.");
+                }
+                const repoOwner = match[1];
+                const repoName = match[2];
+
+                // Fetch commits from GitHub API
+                const queryParams = [];
+                if (startDate) queryParams.push(`since=${new Date(startDate).toISOString()}`);
+                if (endDate) queryParams.push(`until=${new Date(endDate).toISOString()}`);
+                const queryString = queryParams.length ? `?${queryParams.join("&")}` : "";
+
+                const githubResponse = await fetch(
+                    `https://api.github.com/repos/${repoOwner}/${repoName}/commits${queryString}`, {
+                        headers: {
+                            Authorization: `Bearer ${githubToken}`,
+                            Accept: "application/vnd.github.v3+json"
+                        }
+                    }
+                );
+
+                if (!githubResponse.ok) {
+                    throw new Error(`GitHub API error: ${githubResponse.statusText}`);
+                }
+
+                const commits = await githubResponse.json();
+                const commitMessages = commits.map(commit => commit.commit.message).join("\n");
+
+                // Generate update message using OpenAI API
+                const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${openAiToken}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: openAiModel,
+                        messages: [
+                            {
+                                role: "system",
+                                content: "You are an assistant that summarizes commit messages into a user-friendly daily update message which is going to be sent on a public company channel. Generated message consists only of the copyable message and no additional text or explanation."
+                            },
+                            {
+                                role: "user",
+                                content: `Template:\n\n${updateTemplate}\n\nCustom Prompt:\n\n${customPrompt}\n\nHere are the commit messages:\n\n${commitMessages}\n\nPlease generate a concise update message.`
+                            }
+                        ]
+                    })
+                });
+
+                if (!openAiResponse.ok) {
+                    throw new Error(`OpenAI API error: ${openAiResponse.statusText}`);
+                }
+
+                const openAiResult = await openAiResponse.json();
+                const updateMessage = openAiResult.choices[0].message.content;
+
+                // Display the update message
+                document.getElementById("update-message").innerText = updateMessage;
+                // Store form values in localStorage to persist them across page refreshes
+                storeFormValues();
+            } catch (error) {
+                console.error(error);
+                alert(`Error: ${error.message}`);
+            }
+        }
+    </script>
+</head>
+<body>
+    <div style="max-width: 600px; margin: 50px auto; font-family: Arial, sans-serif;">
+        <h2>Generate Daily Update Message</h2>
+        <label>
+            GitHub Token:
+            <input type="password" id="github-token" style="width: 100%; padding: 8px; margin: 5px 0;">
+        </label>
+        <label>
+            Repository URL:
+            <input type="text" id="repo-url" placeholder="https://github.com/owner/repo" style="width: 100%; padding: 8px; margin: 5px 0;">
+        </label>
+        <label>
+            OpenAI Token:
+            <input type="password" id="openai-token" style="width: 100%; padding: 8px; margin: 5px 0;">
+        </label>
+        <label>
+            OpenAI Model:
+            <select id="openai-model" style="width: 100%; padding: 8px; margin: 5px 0;">
+                <option value="gpt-3.5-turbo">GPT-3.5-Turbo</option>
+                <option value="gpt-4">GPT-4</option>
+            </select>
+        </label>
+        <label>
+            Update Template (Example Format):
+            <textarea id="update-template" placeholder="Enter your update template here..." rows="4" style="width: 100%; padding: 8px; margin: 5px 0;"></textarea>
+        </label>
+        <label>
+            Custom Prompt for OpenAI:
+            <textarea id="custom-prompt" placeholder="Enter your custom prompt for generating updates..." rows="4" style="width: 100%; padding: 8px; margin: 5px 0;"></textarea>
+        </label>
+        <label>
+            Start Date and Time:
+            <input type="datetime-local" id="start-date" style="width: 100%; padding: 8px; margin: 5px 0;">
+        </label>
+        <label>
+            End Date and Time:
+            <input type="datetime-local" id="end-date" style="width: 100%; padding: 8px; margin: 5px 0;">
+        </label>
+        <button onclick="fetchCommits()" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; cursor: pointer; font-size: 16px;">Generate Update Message</button>
+        <h3 style="margin-top: 30px;">Generated Update Message:</h3>
+        <pre id="update-message" style="white-space: pre-wrap; word-wrap: break-word;"></pre>
+    </div>
+</body>
+</html>
